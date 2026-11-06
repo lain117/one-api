@@ -16,6 +16,7 @@ import (
 	"github.com/songquanpeng/one-api/middleware"
 	dbmodel "github.com/songquanpeng/one-api/model"
 	"github.com/songquanpeng/one-api/monitor"
+	"github.com/songquanpeng/one-api/relay/affinity"
 	"github.com/songquanpeng/one-api/relay/controller"
 	"github.com/songquanpeng/one-api/relay/model"
 	"github.com/songquanpeng/one-api/relay/relaymode"
@@ -24,6 +25,10 @@ import (
 // https://platform.openai.com/docs/api-reference/chat
 
 func relayHelper(c *gin.Context, relayMode int) *model.ErrorWithStatusCode {
+	if middleware.IsAffinityRequest(c) {
+		release := affinity.Acquire(c.Request.Context(), c.GetString(ctxkey.OriginalModel), c.GetInt(ctxkey.ChannelId))
+		defer release()
+	}
 	var err *model.ErrorWithStatusCode
 	switch relayMode {
 	case relaymode.ImagesGenerations:
@@ -59,6 +64,7 @@ func Relay(c *gin.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		middleware.CommitAffinity(c)
 		monitor.Emit(channelId, true)
 		return
 	}
@@ -95,6 +101,10 @@ func Relay(c *gin.Context) {
 		c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 		bizErr = relayHelper(c, relayMode)
 		if bizErr == nil {
+			if ctx.Err() == nil {
+				middleware.CommitAffinity(c)
+				monitor.Emit(c.GetInt(ctxkey.ChannelId), true)
+			}
 			return
 		}
 		channelId := c.GetInt(ctxkey.ChannelId)

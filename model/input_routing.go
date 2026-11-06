@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math/rand"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/songquanpeng/one-api/common"
 	"github.com/songquanpeng/one-api/common/logger"
+	"github.com/songquanpeng/one-api/relay/affinity"
 	"github.com/songquanpeng/one-api/relay/lengthrouting"
 )
 
@@ -103,14 +105,14 @@ func (ch *Channel) CheckInputModality(input *lengthrouting.Input) error {
 	return nil
 }
 
-func getDBInputChannel(group, model string, ignoreFirstPriority bool, input *lengthrouting.Input) (*Channel, error) {
+func getDBInputChannel(ctx context.Context, group, model string, ignoreFirstPriority bool, input *lengthrouting.Input, request *affinity.Request) (*Channel, affinity.Result, error) {
 	groupColumn := "`group`"
 	if common.UsingPostgreSQL {
 		groupColumn = `"group"`
 	}
 	var abilities []Ability
 	if err := DB.Where(groupColumn+" = ? AND model = ? AND enabled = ?", group, model, true).Find(&abilities).Error; err != nil {
-		return nil, err
+		return nil, affinity.Result{}, err
 	}
 	ids := make([]int, 0, len(abilities))
 	priorities := make(map[int]int64, len(abilities))
@@ -121,20 +123,22 @@ func getDBInputChannel(group, model string, ignoreFirstPriority bool, input *len
 		}
 	}
 	if len(ids) == 0 {
-		return GetRandomSatisfiedChannel(group, model, ignoreFirstPriority)
+		channel, err := GetRandomSatisfiedChannel(group, model, ignoreFirstPriority)
+		return channel, affinity.Result{}, err
 	}
 	var channels []*Channel
 	if err := DB.Where("id IN ?", ids).Find(&channels).Error; err != nil {
-		return nil, err
+		return nil, affinity.Result{}, err
 	}
 	configured := false
 	for _, ch := range channels {
 		ch.prepareInputRule()
 		configured = configured || ch.inputPolicy
 	}
-	// 没有新策略时仍调用原 SQL 选路，不改旧优先级或错误契约。
-	if !configured {
-		return GetRandomSatisfiedChannel(group, model, ignoreFirstPriority)
+	// 输入策略和亲和均未启用时，保留原 SQL 选路。
+	if !configured && request == nil {
+		channel, err := GetRandomSatisfiedChannel(group, model, ignoreFirstPriority)
+		return channel, affinity.Result{}, err
 	}
 	eligible := make([]*Channel, 0, len(channels))
 	for _, ch := range channels {
@@ -143,11 +147,11 @@ func getDBInputChannel(group, model string, ignoreFirstPriority bool, input *len
 		}
 	}
 	if len(eligible) == 0 {
-		return nil, errors.New("channel not found")
+		return nil, affinity.Result{}, errors.New("channel not found")
 	}
 	filtered, err := filterInputChannels(eligible, input)
 	if err != nil {
-		return nil, err
+		return nil, affinity.Result{}, err
 	}
 	sort.SliceStable(filtered, func(i, j int) bool { return priorities[filtered[i].Id] > priorities[filtered[j].Id] })
 	end := len(filtered)
@@ -160,5 +164,30 @@ func getDBInputChannel(group, model string, ignoreFirstPriority bool, input *len
 		}
 	}
 	// 数据库旧实现重试忽略优先级时在所有候选中随机，而缓存路径保留自己的规则。
-	return filtered[rand.Intn(end)], nil
+	channel, result := chooseAffinityChannel(ctx, filtered[:end], request)
+	return channel, result, nil
+}
+
+func chooseAffinityChannel(ctx context.Context, channels []*Channel, request *affinity.Request) (*Channel, affinity.Result) {
+	var result affinity.Result
+	if request != nil {
+		candidates := make([]affinity.Candidate, 0, len(channels))
+		for _, channel := range channels {
+			weight := 1
+			if channel.Weight != nil && *channel.Weight > 0 {
+				weight = int(*channel.Weight)
+				if weight < 0 {
+					weight = int(^uint(0) >> 1)
+				}
+			}
+			candidates = append(candidates, affinity.Candidate{ID: channel.Id, Weight: weight})
+		}
+		result = affinity.Pick(ctx, request, candidates)
+		for _, channel := range channels {
+			if channel.Id == result.ChannelID {
+				return channel, result
+			}
+		}
+	}
+	return channels[rand.Intn(len(channels))], result
 }

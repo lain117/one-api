@@ -56,7 +56,7 @@ URL视频只允许http/https的公网地址，不使用环境代理；DNS拨号�
 
 在渠道 `config` 设置 `"sanitize_response_id":true` 才启用。仅影响Chat的普通/SSE响应顶层字符串id：含prefill_addr或decode_addr的值优先保留末段32/64位十六进制hash；否则使用确定性SHA-256。普通id、非字符串、嵌套id及非Chat响应保持原行为。普通响应正文变化时重算Content-Length；不改变usage或SSE错误处理规则。
 
-这是针对特定上游地址型id的可选清理，社区原版本身没有删除id的问题。启用后需通过网关request ID关联日志，不能要求改写后的id与上游原始id逐字一致。
+这是针对特定上游地址型id的可选清理。启用后需通过网关request ID关联日志，不能要求改写后的id与上游原始id逐字一致。
 
 ## 日志与验证
 
@@ -70,3 +70,5 @@ go build ./...
 ```
 
 HTTP与SQL测试均为隔离mock/内存SQLite，不需要推理服务或生产账号。真实视频测试需要ffmpeg/ffprobe，未安装时明确skip；标准tokenizer测试复用tiktoken原缓存。发布还应验证实际数据库驱动、旧配置、缓存刷新和使用中的SDK。
+
+亲和配置、转发失败与流式完成判据见[渠道亲和与失败处理](channel-affinity.md)。

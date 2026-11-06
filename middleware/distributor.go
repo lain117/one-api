@@ -11,6 +11,7 @@ import (
 	"github.com/songquanpeng/one-api/common/ctxkey"
 	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/model"
+	"github.com/songquanpeng/one-api/relay/affinity"
 	"github.com/songquanpeng/one-api/relay/channeltype"
 )
 
@@ -25,7 +26,7 @@ func Distribute() func(c *gin.Context) {
 		userGroup, _ := model.CacheGetUserGroup(userId)
 		c.Set(ctxkey.Group, userGroup)
 		prepareInputRouting(c)
-		var requestModel string
+		requestModel := c.GetString(ctxkey.RequestModel)
 		var channel *model.Channel
 		channelId, ok := c.Get(ctxkey.SpecificChannelId)
 		if ok {
@@ -50,9 +51,13 @@ func Distribute() func(c *gin.Context) {
 			}
 			RecordInputRouting(c, 1, channel, nil)
 		} else {
-			requestModel = c.GetString(ctxkey.RequestModel)
 			var err error
-			channel, err = model.CacheGetRandomSatisfiedChannel(userGroup, requestModel, false, InputRoutingForRequest(c))
+			request := prepareAffinity(c, userId, userGroup, requestModel)
+			var selected affinity.Result
+			channel, selected, err = model.SelectChannel(ctx, userGroup, requestModel, false, InputRoutingForRequest(c), request)
+			if err == nil {
+				storeAffinityResult(c, selected)
+			}
 			RecordInputRouting(c, 1, channel, err)
 			if err != nil {
 				if errors.Is(err, model.ErrNoInputLengthChannel) || errors.Is(err, model.ErrNoInputModalityChannel) {

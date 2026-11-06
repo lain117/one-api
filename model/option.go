@@ -3,11 +3,15 @@ package model
 import (
 	"github.com/songquanpeng/one-api/common/config"
 	"github.com/songquanpeng/one-api/common/logger"
+	"github.com/songquanpeng/one-api/relay/affinity"
 	billingratio "github.com/songquanpeng/one-api/relay/billing/ratio"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+var affinityOptionUpdateMu sync.Mutex
 
 type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
@@ -24,6 +28,8 @@ func AllOption() ([]*Option, error) {
 func InitOptionMap() {
 	config.OptionMapRWMutex.Lock()
 	config.OptionMap = make(map[string]string)
+	config.OptionMap["AffinityConfig"] = `{"enabled":false}`
+	_ = affinity.Configure("")
 	config.OptionMap["PasswordLoginEnabled"] = strconv.FormatBool(config.PasswordLoginEnabled)
 	config.OptionMap["PasswordRegisterEnabled"] = strconv.FormatBool(config.PasswordRegisterEnabled)
 	config.OptionMap["EmailVerificationEnabled"] = strconv.FormatBool(config.EmailVerificationEnabled)
@@ -80,6 +86,8 @@ func InitOptionMap() {
 }
 
 func loadOptionsFromDatabase() {
+	affinityOptionUpdateMu.Lock()
+	defer affinityOptionUpdateMu.Unlock()
 	options, _ := AllOption()
 	for _, option := range options {
 		if option.Key == "ModelRatio" {
@@ -101,6 +109,18 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
+	if key == "AffinityConfig" {
+		if _, err := affinity.ParseConfig(value); err != nil {
+			return err
+		}
+		// 串行保存和发布，避免并发更新使内存规则落后于数据库。
+		affinityOptionUpdateMu.Lock()
+		defer affinityOptionUpdateMu.Unlock()
+		if err := DB.Save(&Option{Key: key, Value: value}).Error; err != nil {
+			return err
+		}
+		return updateOptionMap(key, value)
+	}
 	// Save to database first
 	option := Option{
 		Key: key,
@@ -119,6 +139,11 @@ func UpdateOption(key string, value string) error {
 func updateOptionMap(key string, value string) (err error) {
 	config.OptionMapRWMutex.Lock()
 	defer config.OptionMapRWMutex.Unlock()
+	if key == "AffinityConfig" {
+		if err = affinity.Configure(value); err != nil {
+			return err
+		}
+	}
 	config.OptionMap[key] = value
 	if strings.HasSuffix(key, "Enabled") {
 		boolValue := value == "true"

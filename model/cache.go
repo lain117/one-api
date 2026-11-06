@@ -8,9 +8,8 @@ import (
 	"github.com/songquanpeng/one-api/common"
 	"github.com/songquanpeng/one-api/common/config"
 	"github.com/songquanpeng/one-api/common/logger"
-	"github.com/songquanpeng/one-api/common/random"
+	"github.com/songquanpeng/one-api/relay/affinity"
 	"github.com/songquanpeng/one-api/relay/lengthrouting"
-	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -231,11 +230,18 @@ func CacheGetRandomSatisfiedChannel(group string, model string, ignoreFirstPrior
 	if len(inputs) > 0 {
 		input = inputs[0]
 	}
+	channel, _, err := SelectChannel(context.Background(), group, model, ignoreFirstPriority, input, nil)
+	return channel, err
+}
+
+// SelectChannel 先应用输入策略和既有优先级，再在合格候选中选择亲和渠道。
+func SelectChannel(ctx context.Context, group, model string, ignoreFirstPriority bool, input *lengthrouting.Input, request *affinity.Request) (*Channel, affinity.Result, error) {
 	if !config.MemoryCacheEnabled {
-		if input != nil {
-			return getDBInputChannel(group, model, ignoreFirstPriority, input)
+		if input != nil || request != nil {
+			return getDBInputChannel(ctx, group, model, ignoreFirstPriority, input, request)
 		}
-		return GetRandomSatisfiedChannel(group, model, ignoreFirstPriority)
+		channel, err := GetRandomSatisfiedChannel(group, model, ignoreFirstPriority)
+		return channel, affinity.Result{}, err
 	}
 	channelSyncLock.RLock()
 	channels := group2model2channels[group][model]
@@ -244,10 +250,10 @@ func CacheGetRandomSatisfiedChannel(group string, model string, ignoreFirstPrior
 	var inputErr error
 	channels, inputErr = filterInputChannels(channels, input)
 	if inputErr != nil {
-		return nil, inputErr
+		return nil, affinity.Result{}, inputErr
 	}
 	if len(channels) == 0 {
-		return nil, errors.New("channel not found")
+		return nil, affinity.Result{}, errors.New("channel not found")
 	}
 	endIdx := len(channels)
 	// choose by priority
@@ -260,11 +266,10 @@ func CacheGetRandomSatisfiedChannel(group string, model string, ignoreFirstPrior
 			}
 		}
 	}
-	idx := rand.Intn(endIdx)
-	if ignoreFirstPriority {
-		if endIdx < len(channels) { // which means there are more than one priority
-			idx = random.RandRange(endIdx, len(channels))
-		}
+	eligible := channels[:endIdx]
+	if ignoreFirstPriority && endIdx < len(channels) {
+		eligible = channels[endIdx:]
 	}
-	return channels[idx], nil
+	channel, result := chooseAffinityChannel(ctx, eligible, request)
+	return channel, result, nil
 }
