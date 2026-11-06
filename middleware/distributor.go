@@ -78,6 +78,8 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	c.Set(ctxkey.Channel, channel.Type)
 	c.Set(ctxkey.ChannelId, channel.Id)
 	c.Set(ctxkey.ChannelName, channel.Name)
+	// 渠道切换不能继承前一个渠道的提示词。
+	c.Set(ctxkey.SystemPrompt, "")
 	if channel.SystemPrompt != nil && *channel.SystemPrompt != "" {
 		c.Set(ctxkey.SystemPrompt, *channel.SystemPrompt)
 	}
