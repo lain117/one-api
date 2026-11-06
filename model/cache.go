@@ -9,6 +9,7 @@ import (
 	"github.com/songquanpeng/one-api/common/config"
 	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/common/random"
+	"github.com/songquanpeng/one-api/relay/lengthrouting"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -175,6 +176,7 @@ func InitChannelCache() {
 	var channels []*Channel
 	DB.Where("status = ?", ChannelStatusEnabled).Find(&channels)
 	for _, channel := range channels {
+		channel.prepareInputRule()
 		newChannelId2channel[channel.Id] = channel
 	}
 	var abilities []*Ability
@@ -224,13 +226,26 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
-func CacheGetRandomSatisfiedChannel(group string, model string, ignoreFirstPriority bool) (*Channel, error) {
+func CacheGetRandomSatisfiedChannel(group string, model string, ignoreFirstPriority bool, inputs ...*lengthrouting.Input) (*Channel, error) {
+	var input *lengthrouting.Input
+	if len(inputs) > 0 {
+		input = inputs[0]
+	}
 	if !config.MemoryCacheEnabled {
+		if input != nil {
+			return getDBInputChannel(group, model, ignoreFirstPriority, input)
+		}
 		return GetRandomSatisfiedChannel(group, model, ignoreFirstPriority)
 	}
 	channelSyncLock.RLock()
-	defer channelSyncLock.RUnlock()
 	channels := group2model2channels[group][model]
+	channelSyncLock.RUnlock()
+	// 快照只读；媒体解析不能占用全局缓存锁。
+	var inputErr error
+	channels, inputErr = filterInputChannels(channels, input)
+	if inputErr != nil {
+		return nil, inputErr
+	}
 	if len(channels) == 0 {
 		return nil, errors.New("channel not found")
 	}

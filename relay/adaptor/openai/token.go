@@ -225,6 +225,11 @@ func CountTokenInput(input any, model string) int {
 	return 0
 }
 
+// CountContentTokens 仅用于可选路由预算，不更改原计费估算开关和模型规则。
+func CountContentTokens(text string) int {
+	return len(getTokenEncoder("gpt-3.5-turbo").Encode(text, nil, nil))
+}
+
 func CountTokenText(text string, model string) int {
 	tokenEncoder := getTokenEncoder(model)
 	return getTokenNum(tokenEncoder, text)

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -23,6 +24,7 @@ func Distribute() func(c *gin.Context) {
 		userId := c.GetInt(ctxkey.Id)
 		userGroup, _ := model.CacheGetUserGroup(userId)
 		c.Set(ctxkey.Group, userGroup)
+		prepareInputRouting(c)
 		var requestModel string
 		var channel *model.Channel
 		channelId, ok := c.Get(ctxkey.SpecificChannelId)
@@ -41,11 +43,22 @@ func Distribute() func(c *gin.Context) {
 				abortWithMessage(c, http.StatusForbidden, "该渠道已被禁用")
 				return
 			}
+			if err := channel.CheckInputModality(InputRoutingForRequest(c)); err != nil {
+				RecordInputRouting(c, 1, channel, err)
+				abortWithMessage(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			RecordInputRouting(c, 1, channel, nil)
 		} else {
 			requestModel = c.GetString(ctxkey.RequestModel)
 			var err error
-			channel, err = model.CacheGetRandomSatisfiedChannel(userGroup, requestModel, false)
+			channel, err = model.CacheGetRandomSatisfiedChannel(userGroup, requestModel, false, InputRoutingForRequest(c))
+			RecordInputRouting(c, 1, channel, err)
 			if err != nil {
+				if errors.Is(err, model.ErrNoInputLengthChannel) || errors.Is(err, model.ErrNoInputModalityChannel) {
+					abortWithMessage(c, http.StatusBadRequest, err.Error())
+					return
+				}
 				message := fmt.Sprintf("当前分组 %s 下对于模型 %s 无可用渠道", userGroup, requestModel)
 				if channel != nil {
 					logger.SysError(fmt.Sprintf("渠道不存在：%d", channel.Id))

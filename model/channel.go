@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/songquanpeng/one-api/relay/lengthrouting"
 
 	"github.com/songquanpeng/one-api/common/config"
 	"github.com/songquanpeng/one-api/common/helper"
@@ -18,6 +19,9 @@ const (
 )
 
 type Channel struct {
+	inputRule          *lengthrouting.Rule
+	inputPolicy        bool
+	inputRuleInvalid   bool
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
 	Key                string  `json:"key" gorm:"type:text"`
@@ -135,6 +139,9 @@ func (channel *Channel) Insert() error {
 }
 
 func (channel *Channel) Update() error {
+	if err := ValidateInputRoutingConfig(channel.Config); err != nil {
+		return err
+	}
 	var err error
 	err = DB.Model(channel).Updates(channel).Error
 	if err != nil {

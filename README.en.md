@@ -327,3 +327,8 @@ The same applies to derivative projects based on this project.
 If you do not wish to include attribution, prior authorization must be obtained.
 
 According to the MIT license, users should bear the risk and responsibility of using this project, and the developer of this open-source project is not responsible for this.
+
+
+### Optional channel input routing
+
+[Optional channel input routing](docs/channel-input-routing.md) — opt-in; existing channel routing is unchanged by default.

@@ -478,3 +478,8 @@ https://openai.justsong.cn
 同样适用于基于本项目的二开项目。
 
 依据 MIT 协议，使用者需自行承担使用本项目的风险与责任，本开源项目开发者与此无关。
+
+
+### 可选渠道输入路由
+
+[可选渠道输入路由](docs/channel-input-routing.md) — opt-in; existing channel routing is unchanged by default.

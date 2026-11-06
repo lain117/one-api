@@ -84,6 +84,10 @@ func AddChannel(c *gin.Context) {
 		})
 		return
 	}
+	if err = model.ValidateInputRoutingConfig(channel.Config); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
 	channel.CreatedTime = helper.GetTimestamp()
 	keys := strings.Split(channel.Key, "\n")
 	channels := make([]model.Channel, 0, len(keys))
