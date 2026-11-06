@@ -27,6 +27,10 @@ type Meta struct {
 	APIType  int
 	Config   model.ChannelConfig
 	IsStream bool
+	// 预期结果数量为零时只接受显式流结束标记。
+	ExpectedChoices int
+	// 失败流的已确认消耗仍需结算，不改变请求失败状态。
+	RecordFailedStreamUsage bool
 	// OriginModelName is the model name from the raw user request
 	OriginModelName string
 	// ActualModelName is the model name after mapping

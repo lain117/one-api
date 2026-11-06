@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/songquanpeng/one-api/common/ctxkey"
 	dbmodel "github.com/songquanpeng/one-api/model"
+	"github.com/songquanpeng/one-api/relay/meta"
 	relaymodel "github.com/songquanpeng/one-api/relay/model"
 	"github.com/songquanpeng/one-api/relay/relaymode"
 )
@@ -150,20 +151,17 @@ func TestResponseIDStreamHTTP(t *testing.T) {
 	choice := fmt.Sprintf(`{"id":%q,"choices":[{"delta":{"content":"hello"}}],"extension":{"id":"decode_addr_nested","number":9007199254740993}}`, id)
 	usage := fmt.Sprintf(`{"id":%q,"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`, id)
 	empty := fmt.Sprintf(`{"id":%q,"choices":[]}`, id)
-	errorFrame := fmt.Sprintf(`{"id":%q,"error":{"type":"upstream_error","message":"failed"}}`, id)
-	numeric := `{"id":7,"choices":[{"delta":{"content":"ignored"}}]}`
-	malformed := `{"id":`
-	invalidChoices := fmt.Sprintf(`{"id":%q,"choices":"invalid"}`, id)
-	body := "data: " + strings.Join([]string{choice, usage, empty, errorFrame, numeric, malformed, invalidChoices, "[DONE]"}, "\n\ndata: ") + "\n\n"
+	numeric := `{"id":7,"choices":[{"delta":{"content":"numeric"}}]}`
+	body := "data: " + strings.Join([]string{choice, usage, empty, numeric, "[DONE]"}, "\n\ndata: ") + "\n\n"
 	_, got, result := runResponseIDHTTP(t, body, "/v1/chat/completions", true, relaymode.ChatCompletions, dbmodel.ChannelConfig{SanitizeResponseID: true})
-	if result.err != nil || result.text != "hello" || result.usage == nil || result.usage.TotalTokens != 3 {
+	if result.err != nil || result.text != "hellonumeric" || result.usage == nil || result.usage.TotalTokens != 3 {
 		t.Fatalf("stream result = %+v", result)
 	}
 	frames := responseIDFrames(string(got))
-	if len(frames) != 6 || frames[2] != numeric || frames[3] != malformed || frames[5] != "[DONE]" {
+	if len(frames) != 4 || frames[2] != numeric || frames[3] != "[DONE]" {
 		t.Fatalf("unexpected frame forwarding: %q", frames)
 	}
-	for i, input := range map[int]string{0: choice, 1: usage, 4: invalidChoices} {
+	for i, input := range []string{choice, usage} {
 		want := decodeResponseIDJSON(t, []byte(input))
 		want["id"] = wantID
 		if !reflect.DeepEqual(decodeResponseIDJSON(t, []byte(frames[i])), want) {
@@ -229,7 +227,7 @@ func runResponseIDHTTP(t *testing.T, body, path string, streaming bool, mode int
 			return
 		}
 		if streaming {
-			handlerErr, text, usage := StreamHandler(c, resp, mode)
+			handlerErr, text, usage := StreamHandler(c, resp, &meta.Meta{Mode: mode, ExpectedChoices: 1})
 			results <- responseIDHandlerResult{handlerErr, text, usage}
 		} else {
 			handlerErr, usage := Handler(c, resp, 1, "test-model")

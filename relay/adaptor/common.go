@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/songquanpeng/one-api/common/client"
+	"github.com/songquanpeng/one-api/relay/apitype"
 	"github.com/songquanpeng/one-api/relay/meta"
+	"github.com/songquanpeng/one-api/relay/relaymode"
 	"io"
 	"net/http"
+	"strings"
 )
 
 func SetupCommonRequestHeader(c *gin.Context, req *http.Request, meta *meta.Meta) {
@@ -26,6 +29,11 @@ func DoRequestHelper(a Adaptor, c *gin.Context, meta *meta.Meta, requestBody io.
 	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
+	}
+	// 文本协议请求继承取消状态，避免断连后继续等待上游。
+	if (meta.Mode == relaymode.ChatCompletions || meta.Mode == relaymode.Completions) &&
+		(meta.APIType == apitype.OpenAI || (meta.APIType == apitype.Zhipu && strings.HasPrefix(meta.ActualModelName, "glm-"))) {
+		req = req.WithContext(c.Request.Context())
 	}
 	err = a.SetupRequestHeader(c, req, meta)
 	if err != nil {

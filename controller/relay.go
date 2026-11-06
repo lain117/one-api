@@ -44,6 +44,9 @@ func relayHelper(c *gin.Context, relayMode int) *model.ErrorWithStatusCode {
 
 func Relay(c *gin.Context) {
 	ctx := c.Request.Context()
+	if ctx.Err() != nil {
+		return
+	}
 	relayMode := relaymode.GetByPath(c.Request.URL.Path)
 	if config.DebugEnabled {
 		requestBody, _ := common.GetRequestBody(c)
@@ -53,6 +56,9 @@ func Relay(c *gin.Context) {
 	userId := c.GetInt(ctxkey.Id)
 	bizErr := relayHelper(c, relayMode)
 	if bizErr == nil {
+		if ctx.Err() != nil {
+			return
+		}
 		monitor.Emit(channelId, true)
 		return
 	}
@@ -60,7 +66,10 @@ func Relay(c *gin.Context) {
 	channelName := c.GetString(ctxkey.ChannelName)
 	group := c.GetString(ctxkey.Group)
 	originalModel := c.GetString(ctxkey.OriginalModel)
-	go processChannelRelayError(ctx, userId, channelId, channelName, *bizErr)
+	// 在失败当下判断取消，避免异步回调误用请求结束后的取消状态。
+	if ctx.Err() == nil {
+		go processChannelRelayError(ctx, userId, channelId, channelName, *bizErr)
+	}
 	requestId := c.GetString(helper.RequestIdKey)
 	retryTimes := config.RetryTimes
 	if !shouldRetry(c, bizErr.StatusCode) {
@@ -68,6 +77,9 @@ func Relay(c *gin.Context) {
 		retryTimes = 0
 	}
 	for i := retryTimes; i > 0; i-- {
+		if !shouldRetry(c, bizErr.StatusCode) {
+			break
+		}
 		channel, err := dbmodel.CacheGetRandomSatisfiedChannel(group, originalModel, i != retryTimes, middleware.InputRoutingForRequest(c))
 		middleware.RecordInputRouting(c, retryTimes-i+2, channel, err)
 		if err != nil {
@@ -88,9 +100,15 @@ func Relay(c *gin.Context) {
 		channelId := c.GetInt(ctxkey.ChannelId)
 		lastFailedChannelId = channelId
 		channelName := c.GetString(ctxkey.ChannelName)
-		go processChannelRelayError(ctx, userId, channelId, channelName, *bizErr)
+		if ctx.Err() == nil {
+			go processChannelRelayError(ctx, userId, channelId, channelName, *bizErr)
+		}
 	}
 	if bizErr != nil {
+		// 已发送的响应不能切换成普通 JSON；取消后停止输出。
+		if c.Writer.Written() || ctx.Err() != nil {
+			return
+		}
 		if bizErr.StatusCode == http.StatusTooManyRequests {
 			bizErr.Error.Message = "当前分组上游负载已饱和，请稍后再试"
 		}
@@ -104,6 +122,9 @@ func Relay(c *gin.Context) {
 }
 
 func shouldRetry(c *gin.Context, statusCode int) bool {
+	if c.Writer.Written() || c.Request.Context().Err() != nil {
+		return false
+	}
 	if _, ok := c.Get(ctxkey.SpecificChannelId); ok {
 		return false
 	}
