@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/songquanpeng/one-api/common/render"
@@ -48,6 +49,10 @@ func StreamHandler(c *gin.Context, resp *http.Response, relayMode int) (*model.E
 		}
 		switch relayMode {
 		case relaymode.ChatCompletions:
+			if responseIDSanitizationEnabled(c) {
+				cleaned, _ := sanitizeChatResponseID([]byte(data[dataPrefixLength:]))
+				data = dataPrefix + string(cleaned)
+			}
 			var streamResponse ChatCompletionsStreamResponse
 			err := json.Unmarshal([]byte(data[dataPrefixLength:]), &streamResponse)
 			if err != nil {
@@ -116,6 +121,15 @@ func Handler(c *gin.Context, resp *http.Response, promptTokens int, modelName st
 			StatusCode: resp.StatusCode,
 		}, nil
 	}
+	// 仅 Chat 接口按渠道选择清理地址，不改变其他接口的响应 ID。
+	if c.Request.URL.Path == "/v1/chat/completions" && responseIDSanitizationEnabled(c) {
+		if cleaned, changed := sanitizeChatResponseID(responseBody); changed {
+			responseBody = cleaned
+			// 改写后必须同步长度，否则客户端可能截断正文或等待不存在的字节。
+			resp.Header.Set("Content-Length", strconv.Itoa(len(responseBody)))
+		}
+	}
+
 	// Reset response body
 	resp.Body = io.NopCloser(bytes.NewBuffer(responseBody))
 

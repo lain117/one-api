@@ -1,6 +1,6 @@
-# 可选渠道输入路由
+# 可选渠道输入路由与 Chat 响应 ID 清理
 
-输入路由按渠道启用，不依赖亲和、Redis或外部计量平台。默认未配置时保持原选路行为。输入路由在候选渠道中筛选资格，再交给原优先级和随机选路；缓存与数据库路径均支持。不会自动把请求改成其他模型，也不会增加通配模型兜底。
+这两项功能独立启用，不依赖亲和、Redis或外部计量平台。默认未配置时保持原选路和响应行为。输入路由在候选渠道中筛选资格，再交给原优先级和随机选路；缓存与数据库路径均支持。不会自动把请求改成其他模型，也不会增加通配模型兜底。
 
 ## 渠道配置
 
@@ -52,6 +52,12 @@
 
 URL视频只允许http/https的公网地址，不使用环境代理；DNS拨号固定校验、每跳重定向验证，拒绝私网/本地及特殊地址。内联视频支持base64 data URI。临时文件在处理结束清理；子进程跟随context终止，限制下载/解码并发、尺寸和工具输出。额外解码边界为最大边8192、像素8192×4320、单次分配256MiB、工具输出256KiB；超限按unknown处理。网关只计帧，不改写或抽帧后替换转发正文。
 
+## 独立的响应 ID 清理
+
+在渠道 `config` 设置 `"sanitize_response_id":true` 才启用。仅影响Chat的普通/SSE响应顶层字符串id：含prefill_addr或decode_addr的值优先保留末段32/64位十六进制hash；否则使用确定性SHA-256。普通id、非字符串、嵌套id及非Chat响应保持原行为。普通响应正文变化时重算Content-Length；不改变usage或SSE错误处理规则。
+
+这是针对特定上游地址型id的可选清理，社区原版本身没有删除id的问题。启用后需通过网关request ID关联日志，不能要求改写后的id与上游原始id逐字一致。
+
 ## 日志与验证
 
 复用现有请求日志，显式策略触发时记录 `input_routing_decision`、尝试编号、选中渠道、模态、计数状态与预算，不记录输入正文或媒体URL。没有新增Prometheus部署或采集端点。
@@ -59,6 +65,7 @@ URL视频只允许http/https的公网地址，不使用环境代理；DNS拨号�
 ```sh
 go test -race ./relay/lengthrouting
 go test -race ./model ./middleware ./controller -run TestInputRouting
+go test -race ./relay/adaptor/openai -run "Test(SanitizeChatResponseID|ResponseID)"
 go build ./...
 ```
 

@@ -480,6 +480,6 @@ https://openai.justsong.cn
 依据 MIT 协议，使用者需自行承担使用本项目的风险与责任，本开源项目开发者与此无关。
 
 
-### 可选渠道输入路由
+### 可选渠道输入路由与响应 ID 清理
 
-[可选渠道输入路由](docs/channel-input-routing.md) — opt-in; existing channel routing is unchanged by default.
+[可选渠道输入路由与响应 ID 清理](docs/channel-input-routing.md) — opt-in; existing channels and response IDs are unchanged by default.
